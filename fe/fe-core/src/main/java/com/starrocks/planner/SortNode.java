@@ -33,6 +33,7 @@ import com.starrocks.analysis.SlotId;
 import com.starrocks.analysis.SlotRef;
 import com.starrocks.analysis.SortInfo;
 import com.starrocks.common.UserException;
+import com.starrocks.sql.optimizer.operator.TopNType;
 import com.starrocks.thrift.TExplainLevel;
 import com.starrocks.thrift.TPlanNode;
 import com.starrocks.thrift.TPlanNodeType;
@@ -54,6 +55,8 @@ public class SortNode extends PlanNode {
     private final SortInfo info;
     private final boolean useTopN;
     private final boolean isDefaultLimit;
+
+    private TopNType topNType = TopNType.ROW_NUMBER;
 
     private long offset;
     // if true, the output of this node feeds an AnalyticNode
@@ -117,6 +120,14 @@ public class SortNode extends PlanNode {
         this.offset = inputSortNode.offset;
     }
 
+    public TopNType getTopNType() {
+        return topNType;
+    }
+
+    public void setTopNType(TopNType topNType) {
+        this.topNType = topNType;
+    }
+
     public long getOffset() {
         return offset;
     }
@@ -176,6 +187,7 @@ public class SortNode extends PlanNode {
         if (info.getPartitionExprs() != null) {
             msg.sort_node.setPartition_exprs(Expr.treesToThrift(info.getPartitionExprs()));
         }
+        msg.sort_node.setTopn_type(topNType.toThrift());
         // TODO(lingbin): remove blew codes, because it is duplicate with TSortInfo
         msg.sort_node.setOrdering_exprs(Expr.treesToThrift(info.getOrderingExprs()));
         msg.sort_node.setIs_asc_order(info.getIsAscOrder());
@@ -204,6 +216,9 @@ public class SortNode extends PlanNode {
     @Override
     protected String getNodeExplainString(String detailPrefix, TExplainLevel detailLevel) {
         StringBuilder output = new StringBuilder();
+        if (!TopNType.ROW_NUMBER.equals(topNType)) {
+            output.append(detailPrefix).append("type: ").append(topNType.toString()).append("\n");
+        }
         Iterator<Expr> partitionExpr = info.getPartitionExprs().iterator();
         boolean start = true;
         while (partitionExpr.hasNext()) {

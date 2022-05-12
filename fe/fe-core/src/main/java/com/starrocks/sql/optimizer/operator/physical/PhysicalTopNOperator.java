@@ -12,6 +12,7 @@ import com.starrocks.sql.optimizer.operator.OperatorType;
 import com.starrocks.sql.optimizer.operator.OperatorVisitor;
 import com.starrocks.sql.optimizer.operator.Projection;
 import com.starrocks.sql.optimizer.operator.SortPhase;
+import com.starrocks.sql.optimizer.operator.TopNType;
 import com.starrocks.sql.optimizer.operator.scalar.ColumnRefOperator;
 import com.starrocks.sql.optimizer.operator.scalar.ScalarOperator;
 
@@ -23,6 +24,7 @@ public class PhysicalTopNOperator extends PhysicalOperator {
     private final long offset;
     private final List<ColumnRefOperator> partitionByColumns;
     private final SortPhase sortPhase;
+    private final TopNType topNType;
     private final boolean isSplit;
     private final boolean isEnforced;
 
@@ -30,6 +32,7 @@ public class PhysicalTopNOperator extends PhysicalOperator {
     public PhysicalTopNOperator(OrderSpec spec, long limit, long offset,
                                 List<ColumnRefOperator> partitionByColumns,
                                 SortPhase sortPhase,
+                                TopNType topNType,
                                 boolean isSplit,
                                 boolean isEnforced,
                                 ScalarOperator predicate,
@@ -39,6 +42,7 @@ public class PhysicalTopNOperator extends PhysicalOperator {
         this.offset = offset;
         this.partitionByColumns = partitionByColumns;
         this.sortPhase = sortPhase;
+        this.topNType = topNType;
         this.isSplit = isSplit;
         this.isEnforced = isEnforced;
         this.predicate = predicate;
@@ -51,6 +55,10 @@ public class PhysicalTopNOperator extends PhysicalOperator {
 
     public SortPhase getSortPhase() {
         return sortPhase;
+    }
+
+    public TopNType getTopNType() {
+        return topNType;
     }
 
     public boolean isSplit() {
