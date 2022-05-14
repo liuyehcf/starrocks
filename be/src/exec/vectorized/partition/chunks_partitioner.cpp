@@ -103,6 +103,8 @@ Status ChunksPartitioner::accept(const std::function<bool(int32_t partition_idx,
     APPLY_FOR_PARTITION_VARIANT_NULL(HASH_MAP_METHOD)
 #undef HASH_MAP_METHOD
 
+    LOG(ERROR) << "fetched rows=" << _tmp_num_rows_fetched;
+
     return Status::OK();
 }
 

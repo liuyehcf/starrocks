@@ -55,6 +55,7 @@ void LocalPartitionTopnContext::sink_complete() {
 
 Status LocalPartitionTopnContext::transfer_all_chunks_from_partitioner_to_sorters(RuntimeState* state) {
     const auto num_partitions = _chunks_partitioner->num_partitions();
+    LOG(ERROR) << "num_partitions=" << num_partitions;
     _chunks_sorters.resize(num_partitions);
     for (int i = 0; i < num_partitions; ++i) {
         _chunks_sorters[i] = std::make_shared<vectorized::ChunksSorterTopn>(
@@ -63,6 +64,8 @@ Status LocalPartitionTopnContext::transfer_all_chunks_from_partitioner_to_sorter
     }
     RETURN_IF_ERROR(
             _chunks_partitioner->accept([this, state](int32_t partition_idx, const vectorized::ChunkPtr& chunk) {
+                LOG(ERROR) << "update, partition_idx=" << partition_idx << ", chunk_size=" << chunk->num_rows() << ", "
+                           << _chunks_sorters[partition_idx].get();
                 _chunks_sorters[partition_idx]->update(state, chunk);
                 return true;
             }));

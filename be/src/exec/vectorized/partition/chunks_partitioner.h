@@ -65,6 +65,8 @@ private:
     bool _hash_map_eos = false;
     bool _null_key_eos = false;
 
+    int32_t _tmp_num_rows_fetched = 0;
+
 private:
     template <typename HashMapWithKey>
     void split_chunk_by_partition(HashMapWithKey& hash_map_with_key, const ChunkPtr& chunk) {
@@ -110,6 +112,7 @@ private:
             ChunkIterator chunk_end = chunks.end();
 
             while (chunk_it != chunk_end) {
+                _tmp_num_rows_fetched += (*chunk_it)->num_rows();
                 if (!consumer(_partition_idx, *chunk_it++)) {
                     return false;
                 }
@@ -155,6 +158,7 @@ private:
         while (chunk_it != chunk_end) {
             // Because we first fetch chunks from hash_map, so the _partition_idx here
             // is already set to hash_map.size()
+            _tmp_num_rows_fetched += (*chunk_it)->num_rows();
             if (!consumer(_partition_idx, *chunk_it++)) {
                 return false;
             }
