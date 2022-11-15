@@ -29,6 +29,7 @@
 #include "exec/query_cache/cache_manager.h"
 #include "exec/workgroup/work_group_fwd.h"
 #include "storage/options.h"
+#include "util/threadpool.h"
 // NOTE: Be careful about adding includes here. This file is included by many files.
 // Unnecssary includes will cause compilatio very slow.
 // So please consider use forward declaraion as much as possible.
@@ -50,7 +51,6 @@ class TransactionMgr;
 class MemTracker;
 class MetricRegistry;
 class StorageEngine;
-class ThreadPool;
 class PriorityThreadPool;
 class ResultBufferMgr;
 class ResultQueueMgr;
@@ -151,6 +151,8 @@ public:
 
     ThreadResourceMgr* thread_mgr() { return _thread_mgr; }
     PriorityThreadPool* thread_pool() { return _thread_pool; }
+    ThreadPool* brpc_pool1() { return _brpc_pool1.get(); }
+    ThreadPool* brpc_pool2() { return _brpc_pool2.get(); }
     workgroup::ScanExecutor* scan_executor_without_workgroup() { return _scan_executor_without_workgroup; }
     workgroup::ScanExecutor* scan_executor_with_workgroup() { return _scan_executor_with_workgroup; }
     workgroup::ScanExecutor* connector_scan_executor_without_workgroup() {
@@ -277,6 +279,8 @@ private:
 
     ThreadResourceMgr* _thread_mgr = nullptr;
     PriorityThreadPool* _thread_pool = nullptr;
+    std::unique_ptr<ThreadPool> _brpc_pool1 = nullptr;
+    std::unique_ptr<ThreadPool> _brpc_pool2 = nullptr;
 
     workgroup::ScanExecutor* _scan_executor_without_workgroup = nullptr;
     workgroup::ScanExecutor* _scan_executor_with_workgroup = nullptr;

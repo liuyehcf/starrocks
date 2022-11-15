@@ -145,6 +145,18 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
             new PriorityThreadPool("table_scan_io", // olap/external table scan thread pool
                                    config::scanner_thread_pool_thread_num, config::scanner_thread_pool_queue_size);
 
+    RETURN_IF_ERROR(ThreadPoolBuilder("brpc_pool1")
+                            .set_min_threads(16)
+                            .set_max_threads(16)
+                            .set_max_queue_size(10000)
+                            .set_idle_timeout(MonoDelta::FromMilliseconds(2000))
+                            .build(&_brpc_pool1));
+    RETURN_IF_ERROR(ThreadPoolBuilder("brpc_pool2")
+                            .set_min_threads(16)
+                            .set_max_threads(16)
+                            .set_max_queue_size(10000)
+                            .set_idle_timeout(MonoDelta::FromMilliseconds(2000))
+                            .build(&_brpc_pool2));
     _udf_call_pool = new PriorityThreadPool("udf", config::udf_thread_pool_size, config::udf_thread_pool_size);
     _fragment_mgr = new FragmentMgr(this);
 
