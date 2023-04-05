@@ -18,6 +18,8 @@
 #include <chrono>
 #include <limits>
 
+#include "column/fixed_length_column.h"
+#include "column/vectorized_fwd.h"
 #include "exec/pipeline/sort/sort_context.h"
 #include "runtime/runtime_state.h"
 #include "util/defer_op.h"
@@ -169,7 +171,7 @@ void detail::_do_merge_along_merge_path(const SortDescs& descs, const InputSegme
         size_t offset = std::numeric_limits<size_t>::max();
 
         // Auxiliary data structure for Chunk::append
-        std::optional<std::pair<size_t, size_t>> range;
+        std::pair<size_t, size_t> range;
 
         MergeIterator(const InputSegment& input) : input(input) {}
     };
@@ -196,15 +198,7 @@ void detail::_do_merge_along_merge_path(const SortDescs& descs, const InputSegme
 
     auto append = [](const MergeIterator& src_it, OutputSegment& dest) {
         auto column_append = [](auto& src_column, auto& dest_column, const MergeIterator& it) {
-            if (!it.range.has_value()) {
-                if (src_column->is_null(it.offset)) {
-                    dest_column->append_nulls(1);
-                } else {
-                    dest_column->append_datum(src_column->get(it.offset));
-                }
-            } else {
-                dest_column->append(*src_column, it.range.value().first, it.range.value().second);
-            }
+            dest_column->append(*src_column, it.range.first, it.range.second);
         };
         for (size_t col = 0; col < src_it.run->orderby.size(); col++) {
             auto& src_column = src_it.run->orderby[col];
@@ -222,7 +216,6 @@ void detail::_do_merge_along_merge_path(const SortDescs& descs, const InputSegme
         DCHECK(it.run != nullptr);
         if (it.offset >= it.run->end_index()) {
             it.run = nullptr;
-            it.range.reset();
             do {
                 it.run_idx++;
                 if (it.run_idx >= it.input.runs.num_chunks()) {
@@ -246,7 +239,6 @@ void detail::_do_merge_along_merge_path(const SortDescs& descs, const InputSegme
             r_it.range = std::make_pair(r_it.offset, remain);
             append(r_it, dest);
             r_it.offset += remain;
-            r_it.range.reset();
             forward_iterator(r_it);
         } else if (ri >= right.start + right.len) {
             // Right input has already been exhausted
@@ -257,7 +249,6 @@ void detail::_do_merge_along_merge_path(const SortDescs& descs, const InputSegme
             l_it.range = std::make_pair(l_it.offset, remain);
             append(l_it, dest);
             l_it.offset += remain;
-            l_it.range.reset();
             forward_iterator(l_it);
         } else {
             auto range_first_process = [&dest, &append, &forward_iterator, max_step](
@@ -296,22 +287,13 @@ void detail::_do_merge_along_merge_path(const SortDescs& descs, const InputSegme
 
                 DCHECK_GE(previous_offset, original_offset);
                 it.offset = original_offset;
-                if (original_offset == previous_offset) {
-                    di++;
-                    index++;
-                    append(it, dest);
-                    it.offset++;
-                    forward_iterator(it);
-                } else {
-                    const size_t len = previous_offset + 1 - original_offset;
-                    it.range = std::make_pair(original_offset, len);
-                    di += len;
-                    index += len;
-                    append(it, dest);
-                    it.offset += len;
-                    it.range.reset();
-                    forward_iterator(it);
-                }
+                const size_t len = previous_offset + 1 - original_offset;
+                it.range = std::make_pair(original_offset, len);
+                di += len;
+                index += len;
+                append(it, dest);
+                it.offset += len;
+                forward_iterator(it);
             };
 
             auto compare = [&descs, &l_it, &r_it]() {
@@ -471,6 +453,14 @@ void detail::LeafNode::process_input(int32_t parallel_idx) {
             auto column = EVALUATE_NULL_IF_ERROR(expr, expr->root(), chunk.get());
             orderby.push_back(column);
         }
+
+        if (_late_materialization) {
+            SCOPED_TIMER(_merger->get_metrics(parallel_idx).late_materialization_build_timer);
+            const size_t num_rows = chunk->num_rows();
+            const size_t chunk_id = _merger->add_original_chunk(std::move(chunk));
+            chunk = _generate_permutation_chunk(chunk_id, num_rows);
+        }
+
         SortedRun run(std::move(chunk), std::move(orderby));
         auto output_segment = std::make_unique<OutputSegment>(std::move(run), chunk->num_rows());
 
@@ -483,10 +473,27 @@ void detail::LeafNode::process_input(int32_t parallel_idx) {
     }
 }
 
+ChunkPtr detail::LeafNode::_generate_permutation_chunk(size_t chunk_id, size_t num_rows) {
+    static TypeDescriptor s_type_desc = TypeDescriptor(TYPE_BIGINT);
+    static Chunk::SlotHashMap s_slot_map = {{0, 0}};
+    ColumnPtr perm_column = ColumnHelper::create_column(s_type_desc, false);
+    perm_column->resize(num_rows);
+    auto* raw_array = down_cast<Int64Column*>(perm_column.get())->get_data().data();
+
+    for (int64_t row = 0; row < num_rows; row++) {
+        // <---44 bits for chunk id--><--20 bits for row-->
+        raw_array[row] = (static_cast<int64_t>(chunk_id) << 44) | static_cast<int64_t>(row);
+    }
+
+    Columns columns;
+    columns.push_back(std::move(perm_column));
+    return std::make_shared<Chunk>(columns, s_slot_map);
+}
+
 MergePathCascadeMerger::MergePathCascadeMerger(const int32_t degree_of_parallelism,
                                                std::vector<ExprContext*> sort_exprs, const SortDescs& sort_descs,
                                                std::vector<MergePathChunkProvider> chunk_providers,
-                                               const size_t chunk_size)
+                                               const size_t chunk_size, bool late_materialization)
         : _chunk_size(chunk_size),
           _streaming_batch_size(chunk_size * degree_of_parallelism),
           _degree_of_parallelism(degree_of_parallelism),
@@ -494,7 +501,9 @@ MergePathCascadeMerger::MergePathCascadeMerger(const int32_t degree_of_paralleli
           _sort_descs(std::move(sort_descs)),
           _chunk_providers(std::move(chunk_providers)),
           _process_cnts(degree_of_parallelism),
+          _late_materialization(late_materialization),
           _output_chunks(degree_of_parallelism) {
+    LOG(ERROR) << "_late_materialization=" << _late_materialization << ", " << this;
     _working_nodes.resize(_degree_of_parallelism);
     _metrics.resize(_degree_of_parallelism);
 
@@ -633,6 +642,16 @@ void MergePathCascadeMerger::bind_profile(int32_t parallel_idx, RuntimeProfile* 
             ADD_CHILD_COUNTER(metrics.profile, "6-PendingStageCount", TUnit::UNIT, overall_stage_counter_name);
     metrics.stage_counters[detail::Stage::FINISHED] =
             ADD_CHILD_COUNTER(metrics.profile, "7-FinishedStageCount", TUnit::UNIT, overall_stage_counter_name);
+
+    metrics.late_materialization_build_timer = ADD_TIMER(metrics.profile, "LateMaterializationBuildTime");
+    metrics.late_materialization_timer = ADD_TIMER(metrics.profile, "LateMaterializationTime");
+}
+
+size_t MergePathCascadeMerger::add_original_chunk(ChunkPtr&& chunk) {
+    std::lock_guard<std::mutex> l(_m);
+    const size_t chunk_id = _chunk_id_generator++;
+    _original_chunks[chunk_id] = std::move(chunk);
+    return chunk_id;
 }
 
 bool MergePathCascadeMerger::_is_current_stage_done() {
@@ -663,9 +682,11 @@ void MergePathCascadeMerger::_forward_stage(const detail::Stage& stage, int32_t 
 void MergePathCascadeMerger::_init() {
     DCHECK(_stage == detail::Stage::INIT);
 
+    _late_materialization = _late_materialization && _chunk_providers.size() > 1;
+    LOG(ERROR) << "after init, _late_materialization=" << _late_materialization << ", " << this;
     std::vector<detail::NodePtr> leaf_nodes;
     for (auto& _chunk_provider : _chunk_providers) {
-        auto leaf_node = std::make_unique<detail::LeafNode>(this);
+        auto leaf_node = std::make_unique<detail::LeafNode>(this, _late_materialization);
         leaf_node->set_provider(std::move(_chunk_provider));
         _leafs.push_back(leaf_node.get());
         leaf_nodes.push_back(std::move(leaf_node));
@@ -787,6 +808,7 @@ void MergePathCascadeMerger::_split_chunk(int32_t parallel_idx) {
     DeferOp defer([this, parallel_idx]() {
         _finish_current_stage(parallel_idx, [this]() {
             if (_root->is_leaf()) {
+                DCHECK(!_late_materialization);
                 for (auto&& output_segment : _root->output_segments()) {
                     _flat_output_chunks.push_back(std::move(output_segment->run.chunk));
                 }
@@ -824,6 +846,9 @@ void MergePathCascadeMerger::_split_chunk(int32_t parallel_idx) {
         DCHECK(chunk != nullptr);
         DCHECK_GE(remain_size, chunk->num_rows());
         remain_size -= chunk->num_rows();
+        if (_late_materialization) {
+            chunk = _late_materialize_chunk(parallel_idx, chunk);
+        }
         _output_chunks[parallel_idx].push_back(std::move(chunk));
     }
 }
@@ -861,6 +886,52 @@ void MergePathCascadeMerger::_fetch_chunk(int32_t parallel_idx, ChunkPtr& chunk)
     }
 
     finished = _output_idx >= _flat_output_chunks.size();
+}
+
+ChunkPtr MergePathCascadeMerger::_late_materialize_chunk(int32_t parallel_idx, const ChunkPtr& chunk) {
+    SCOPED_TIMER(_metrics[parallel_idx].late_materialization_timer);
+
+    if (chunk == nullptr || chunk->is_empty()) {
+        return nullptr;
+    }
+
+    const auto& perms = down_cast<Int64Column*>(chunk->get_column_by_index(0).get())->get_data();
+
+    ChunkPtr output = nullptr;
+
+    const size_t num_rows = chunk->num_rows();
+    int64_t prev_chunk_id = -1;
+    size_t prev_row = std::numeric_limits<size_t>::max();
+    size_t range_start = std::numeric_limits<size_t>::max();
+
+    for (int64_t perm : perms) {
+        // <---44 bits for chunk id--><--20 bits for row-->
+        const auto chunk_id = static_cast<size_t>(perm >> 44);
+        const auto row = static_cast<size_t>(perm & (0xfffff));
+        if (prev_chunk_id == -1) {
+            output = _original_chunks[chunk_id]->clone_empty(num_rows);
+            prev_chunk_id = chunk_id;
+            prev_row = row;
+            range_start = row;
+            continue;
+        }
+        if (chunk_id == prev_chunk_id && row == prev_row + 1) {
+            prev_row = row;
+            continue;
+        }
+
+        // append previous range
+        output->append(*_original_chunks[prev_chunk_id], range_start, prev_row - range_start + 1);
+
+        prev_chunk_id = chunk_id;
+        range_start = row;
+        prev_row = row;
+    }
+
+    // append last part
+    output->append(*_original_chunks[prev_chunk_id], range_start, prev_row - range_start + 1);
+
+    return output;
 }
 
 void MergePathCascadeMerger::_find_unfinished_level() {

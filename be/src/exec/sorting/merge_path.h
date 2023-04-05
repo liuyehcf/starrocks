@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include <unordered_map>
 #include <utility>
 
 #include "column/vectorized_fwd.h"
@@ -22,6 +23,9 @@
 #include "exec/sorting/sorting.h"
 #include "util/runtime_profile.h"
 
+// TODO
+// 1. time skew
+// 2. use MergeIterator::range only
 namespace starrocks::merge_path {
 
 struct InputSegment {
@@ -187,7 +191,7 @@ protected:
     // pair.first store global parallel_idx, pair.second store local parallel_idx
     std::unordered_map<int32_t, int32_t> _global_2_local_parallel_idx;
 
-    // Every time traversing, current node must all the output of its children
+    // Output segments of current processing, it will be all fetched by its parent
     std::vector<OutputSegmentPtr> _output_segments;
 
     std::mutex _m;
@@ -221,7 +225,8 @@ private:
 
 class LeafNode final : public Node {
 public:
-    LeafNode(MergePathCascadeMerger* merger) : Node(merger) {}
+    LeafNode(MergePathCascadeMerger* merger, bool late_materialization)
+            : Node(merger), _late_materialization(late_materialization) {}
 
     void process_input(int32_t parallel_idx) override;
     bool dependency_finished() override { return _provider_eos; }
@@ -232,8 +237,11 @@ public:
     void set_provider(MergePathChunkProvider&& provider) { _provider = std::move(provider); }
 
 private:
-    bool _provider_eos = false;
+    ChunkPtr _generate_permutation_chunk(size_t chunk_id, size_t num_rows);
+
+    const bool _late_materialization;
     MergePathChunkProvider _provider;
+    bool _provider_eos = false;
 };
 
 // Transition graph is as follows:
@@ -335,6 +343,9 @@ struct Metrics {
     // 6 -> Stage::FINISHED
     std::vector<RuntimeProfile::Counter*> stage_timers;
     std::vector<RuntimeProfile::Counter*> stage_counters;
+
+    RuntimeProfile::Counter* late_materialization_build_timer;
+    RuntimeProfile::Counter* late_materialization_timer;
 };
 } // namespace detail
 
@@ -342,7 +353,7 @@ class MergePathCascadeMerger {
 public:
     MergePathCascadeMerger(const int32_t degree_of_parallelism, std::vector<ExprContext*> sort_exprs,
                            const SortDescs& sort_descs, std::vector<MergePathChunkProvider> chunk_providers,
-                           const size_t chunk_size);
+                           const size_t chunk_size, bool late_materialization);
     const std::vector<ExprContext*>& sort_exprs() const { return _sort_exprs; }
     const SortDescs& sort_descs() const { return _sort_descs; }
 
@@ -365,6 +376,9 @@ public:
 
     void bind_profile(int32_t parallel_idx, RuntimeProfile* profile);
 
+    size_t add_original_chunk(ChunkPtr&& chunk);
+    detail::Metrics& get_metrics(int32_t parallel_idx) { return _metrics[parallel_idx]; }
+
 private:
     bool _is_current_stage_done();
     void _forward_stage(const detail::Stage& stage, int32_t worker_num, std::vector<size_t>* process_cnts = nullptr);
@@ -374,6 +388,8 @@ private:
     void _process(int32_t parallel_idx);
     void _split_chunk(int32_t parallel_idx);
     void _fetch_chunk(int32_t parallel_idx, ChunkPtr& chunk);
+
+    ChunkPtr _late_materialize_chunk(int32_t parallel_idx, const ChunkPtr& chunk);
 
     void _find_unfinished_level();
     using Action = std::function<void()>;
@@ -418,6 +434,11 @@ private:
     // In some cases, one parallelism may have to process more than one node.
     // _working_nodes[i] represents the node list for parallel_idx=<i>
     std::vector<std::vector<detail::Node*>> _working_nodes;
+
+    // Fields used for late materialization
+    bool _late_materialization = false;
+    size_t _chunk_id_generator = 0;
+    std::unordered_map<size_t, ChunkPtr> _original_chunks;
 
     // Output chunks for each parallelism
     std::vector<std::vector<ChunkPtr>> _output_chunks;

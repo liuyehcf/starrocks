@@ -108,7 +108,7 @@ merge_path::MergePathCascadeMerger* ExchangeParallelMergeSourceOperatorFactory::
         SortDescs sort_descs(_is_asc_order, _nulls_first);
         _merger = std::make_unique<merge_path::MergePathCascadeMerger>(
                 degree_of_parallelism(), _sort_exec_exprs->lhs_ordering_expr_ctxs(), sort_descs, chunk_providers,
-                state->chunk_size());
+                state->chunk_size(), _late_materialization);
     }
     return _merger.get();
 }

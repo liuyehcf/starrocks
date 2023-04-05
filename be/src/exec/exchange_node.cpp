@@ -255,9 +255,11 @@ pipeline::OpFactories ExchangeNode::decompose_to_pipeline(pipeline::PipelineBuil
         operators.emplace_back(exchange_source_op);
     } else {
         if (_is_parallel_merge) {
+            const bool late_materialization = _texchange_node.__isset.enable_parallel_merge_late_materialization &&
+                                              _texchange_node.enable_parallel_merge_late_materialization;
             auto exchange_merge_sort_source_operator = std::make_shared<ExchangeParallelMergeSourceOperatorFactory>(
                     context->next_operator_id(), id(), _num_senders, _input_row_desc, &_sort_exec_exprs, _is_asc_order,
-                    _nulls_first, _offset, _limit);
+                    _nulls_first, _offset, _limit, late_materialization);
             exchange_merge_sort_source_operator->set_degree_of_parallelism(context->degree_of_parallelism());
             operators.emplace_back(std::move(exchange_merge_sort_source_operator));
             // This particular exchange source will be executed in a concurrent way, and finally we need to gather them into one

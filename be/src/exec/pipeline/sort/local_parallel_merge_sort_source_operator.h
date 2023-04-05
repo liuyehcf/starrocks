@@ -87,7 +87,10 @@ public:
     Status prepare(RuntimeState* state) override;
     OperatorPtr create(int32_t degree_of_parallelism, int32_t driver_sequence) override;
 
+    void set_late_materialization(bool late_materialization) { _late_materialization = late_materialization; }
+
 private:
+    bool _late_materialization = false;
     RuntimeState* _state;
 
     // share data with multiple partition sort sink opeartor through _sort_context.

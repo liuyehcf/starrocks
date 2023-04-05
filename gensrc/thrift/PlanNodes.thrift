@@ -732,6 +732,7 @@ struct TSortNode {
   28: optional i64 max_buffered_bytes;
   29: optional bool late_materialization;
   30: optional bool enable_parallel_merge;
+  31: optional bool enable_parallel_merge_late_materialization;
 }
 
 enum TAnalyticWindowType {
@@ -889,6 +890,7 @@ struct TExchangeNode {
   // Sender's partition type
   4: optional Partitions.TPartitionType partition_type;
   5: optional bool enable_parallel_merge;
+  6: optional bool enable_parallel_merge_late_materialization;
 }
 
 // This contains all of the information computed by the plan as part of the resource

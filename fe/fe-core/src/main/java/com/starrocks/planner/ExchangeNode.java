@@ -194,6 +194,8 @@ public class ExchangeNode extends PlanNode {
         }
         SessionVariable sessionVariable = ConnectContext.get().getSessionVariable();
         msg.exchange_node.setEnable_parallel_merge(sessionVariable.isEnableParallelMerge());
+        msg.exchange_node.setEnable_parallel_merge_late_materialization(
+                sessionVariable.isEnableParallelMergeLateMaterialization());
     }
 
     @Override
