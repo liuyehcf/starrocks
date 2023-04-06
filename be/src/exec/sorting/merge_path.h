@@ -21,11 +21,11 @@
 #include "common/status.h"
 #include "exec/sorting/merge.h"
 #include "exec/sorting/sorting.h"
+#include "runtime/descriptors.h"
 #include "util/runtime_profile.h"
 
 // TODO
 // 1. time skew
-// 2. use MergeIterator::range only
 namespace starrocks::merge_path {
 
 struct InputSegment {
@@ -343,17 +343,14 @@ struct Metrics {
     // 6 -> Stage::FINISHED
     std::vector<RuntimeProfile::Counter*> stage_timers;
     std::vector<RuntimeProfile::Counter*> stage_counters;
-
-    RuntimeProfile::Counter* late_materialization_build_timer;
-    RuntimeProfile::Counter* late_materialization_timer;
 };
 } // namespace detail
 
 class MergePathCascadeMerger {
 public:
     MergePathCascadeMerger(const int32_t degree_of_parallelism, std::vector<ExprContext*> sort_exprs,
-                           const SortDescs& sort_descs, std::vector<MergePathChunkProvider> chunk_providers,
-                           const size_t chunk_size, bool late_materialization);
+                           const SortDescs& sort_descs, const TupleDescriptor* tuple_desc,
+                           std::vector<MergePathChunkProvider> chunk_providers, const size_t chunk_size);
     const std::vector<ExprContext*>& sort_exprs() const { return _sort_exprs; }
     const SortDescs& sort_descs() const { return _sort_descs; }
 
@@ -389,6 +386,7 @@ private:
     void _split_chunk(int32_t parallel_idx);
     void _fetch_chunk(int32_t parallel_idx, ChunkPtr& chunk);
 
+    void _init_late_materialization();
     ChunkPtr _late_materialize_chunk(int32_t parallel_idx, const ChunkPtr& chunk);
 
     void _find_unfinished_level();
@@ -400,12 +398,14 @@ private:
     void _reset_output();
 
 private:
+    constexpr static size_t MAX_CHUNK_SIZE = 0xfffff;
     const size_t _chunk_size;
     const size_t _streaming_batch_size;
 
     const int32_t _degree_of_parallelism;
     const std::vector<ExprContext*> _sort_exprs;
     const SortDescs _sort_descs;
+    const TupleDescriptor* _tuple_desc;
     std::vector<MergePathChunkProvider> _chunk_providers;
     Action _finish_merge_action;
 

@@ -107,8 +107,8 @@ merge_path::MergePathCascadeMerger* ExchangeParallelMergeSourceOperatorFactory::
         auto chunk_providers = _stream_recvr->create_merge_path_chunk_providers();
         SortDescs sort_descs(_is_asc_order, _nulls_first);
         _merger = std::make_unique<merge_path::MergePathCascadeMerger>(
-                degree_of_parallelism(), _sort_exec_exprs->lhs_ordering_expr_ctxs(), sort_descs, chunk_providers,
-                state->chunk_size(), _late_materialization);
+                degree_of_parallelism(), _sort_exec_exprs->lhs_ordering_expr_ctxs(), sort_descs,
+                _row_desc.tuple_descriptors()[0], chunk_providers, state->chunk_size());
     }
     return _merger.get();
 }

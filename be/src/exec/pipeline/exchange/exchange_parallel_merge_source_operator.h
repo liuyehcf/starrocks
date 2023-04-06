@@ -101,8 +101,7 @@ public:
     ExchangeParallelMergeSourceOperatorFactory(int32_t id, int32_t plan_node_id, int32_t num_sender,
                                                const RowDescriptor& row_desc, SortExecExprs* sort_exec_exprs,
                                                const std::vector<bool>& is_asc_order,
-                                               const std::vector<bool>& nulls_first, int64_t offset, int64_t limit,
-                                               bool late_materialization)
+                                               const std::vector<bool>& nulls_first, int64_t offset, int64_t limit)
             : SourceOperatorFactory(id, "global_parallel_merge_source", plan_node_id),
               _num_sender(num_sender),
               _row_desc(row_desc),
@@ -110,8 +109,7 @@ public:
               _is_asc_order(is_asc_order),
               _nulls_first(nulls_first),
               _offset(offset),
-              _limit(limit),
-              _late_materialization(late_materialization) {}
+              _limit(limit) {}
 
     ~ExchangeParallelMergeSourceOperatorFactory() override = default;
 
@@ -135,7 +133,6 @@ private:
     const std::vector<bool>& _nulls_first;
     int64_t _offset;
     int64_t _limit;
-    bool _late_materialization;
 
     std::shared_ptr<DataStreamRecvr> _stream_recvr;
     std::atomic<int64_t> _stream_recvr_cnt = 0;

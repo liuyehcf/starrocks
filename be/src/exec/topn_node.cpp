@@ -340,10 +340,8 @@ std::vector<std::shared_ptr<pipeline::OperatorFactory>> TopNNode::_decompose_to_
 
     source_operator = std::make_shared<SourceFactory>(context->next_operator_id(), id(), context_factory);
     if (enable_parallel_merge) {
-        bool late_materialization = _tnode.sort_node.__isset.enable_parallel_merge_late_materialization &&
-                                    _tnode.sort_node.enable_parallel_merge_late_materialization;
         down_cast<LocalParallelMergeSortSourceOperatorFactory*>(source_operator.get())
-                ->set_late_materialization(late_materialization);
+                ->set_tuple_desc(_materialized_tuple_desc);
     }
 
     ops_sink_with_sort.emplace_back(std::move(sink_operator));

@@ -455,7 +455,6 @@ void detail::LeafNode::process_input(int32_t parallel_idx) {
         }
 
         if (_late_materialization) {
-            SCOPED_TIMER(_merger->get_metrics(parallel_idx).late_materialization_build_timer);
             const size_t num_rows = chunk->num_rows();
             const size_t chunk_id = _merger->add_original_chunk(std::move(chunk));
             chunk = _generate_permutation_chunk(chunk_id, num_rows);
@@ -492,18 +491,18 @@ ChunkPtr detail::LeafNode::_generate_permutation_chunk(size_t chunk_id, size_t n
 
 MergePathCascadeMerger::MergePathCascadeMerger(const int32_t degree_of_parallelism,
                                                std::vector<ExprContext*> sort_exprs, const SortDescs& sort_descs,
+                                               const TupleDescriptor* tuple_desc,
                                                std::vector<MergePathChunkProvider> chunk_providers,
-                                               const size_t chunk_size, bool late_materialization)
-        : _chunk_size(chunk_size),
+                                               const size_t chunk_size)
+        : _chunk_size(chunk_size > MAX_CHUNK_SIZE ? MAX_CHUNK_SIZE : chunk_size),
           _streaming_batch_size(chunk_size * degree_of_parallelism),
           _degree_of_parallelism(degree_of_parallelism),
           _sort_exprs(std::move(sort_exprs)),
           _sort_descs(std::move(sort_descs)),
+          _tuple_desc(tuple_desc),
           _chunk_providers(std::move(chunk_providers)),
           _process_cnts(degree_of_parallelism),
-          _late_materialization(late_materialization),
           _output_chunks(degree_of_parallelism) {
-    LOG(ERROR) << "_late_materialization=" << _late_materialization << ", " << this;
     _working_nodes.resize(_degree_of_parallelism);
     _metrics.resize(_degree_of_parallelism);
 
@@ -642,9 +641,6 @@ void MergePathCascadeMerger::bind_profile(int32_t parallel_idx, RuntimeProfile* 
             ADD_CHILD_COUNTER(metrics.profile, "6-PendingStageCount", TUnit::UNIT, overall_stage_counter_name);
     metrics.stage_counters[detail::Stage::FINISHED] =
             ADD_CHILD_COUNTER(metrics.profile, "7-FinishedStageCount", TUnit::UNIT, overall_stage_counter_name);
-
-    metrics.late_materialization_build_timer = ADD_TIMER(metrics.profile, "LateMaterializationBuildTime");
-    metrics.late_materialization_timer = ADD_TIMER(metrics.profile, "LateMaterializationTime");
 }
 
 size_t MergePathCascadeMerger::add_original_chunk(ChunkPtr&& chunk) {
@@ -682,8 +678,8 @@ void MergePathCascadeMerger::_forward_stage(const detail::Stage& stage, int32_t 
 void MergePathCascadeMerger::_init() {
     DCHECK(_stage == detail::Stage::INIT);
 
-    _late_materialization = _late_materialization && _chunk_providers.size() > 1;
-    LOG(ERROR) << "after init, _late_materialization=" << _late_materialization << ", " << this;
+    _init_late_materialization();
+
     std::vector<detail::NodePtr> leaf_nodes;
     for (auto& _chunk_provider : _chunk_providers) {
         auto leaf_node = std::make_unique<detail::LeafNode>(this, _late_materialization);
@@ -888,9 +884,56 @@ void MergePathCascadeMerger::_fetch_chunk(int32_t parallel_idx, ChunkPtr& chunk)
     finished = _output_idx >= _flat_output_chunks.size();
 }
 
-ChunkPtr MergePathCascadeMerger::_late_materialize_chunk(int32_t parallel_idx, const ChunkPtr& chunk) {
-    SCOPED_TIMER(_metrics[parallel_idx].late_materialization_timer);
+void MergePathCascadeMerger::_init_late_materialization() {
+    DeferOp defer([this]() {
+        std::for_each(_metrics.begin(), _metrics.end(), [this](auto& metrics) {
+            metrics.profile->add_info_string("LateMaterialization", _late_materialization ? "true" : "false");
+        });
+    });
 
+    if (_chunk_providers.size() <= 2) {
+        _late_materialization = false;
+        return;
+    }
+
+    const auto level_size = static_cast<size_t>(std::ceil(std::log2(_chunk_providers.size())));
+    size_t materialized_cost = 0;
+    for (auto* slot : _tuple_desc->slots()) {
+        // nullable column always contribute 1 byte to materialized cost.
+        materialized_cost += slot->is_nullable();
+        if (slot->type().is_string_type()) {
+            // Slice is 16 bytes
+            materialized_cost += 16;
+        } else {
+            materialized_cost += std::max<int>(1, slot->type().get_slot_size());
+        }
+    }
+    const size_t total_original_cost = materialized_cost * level_size;
+
+    // For late materialization, a auxiliary column(Int64Column) will be added to record the
+    // original chunk id and row offset.
+    // And in terms of locality, the larger the level, the worse the locality will be, so we need to apply
+    // a locality decay factor for the late materialization
+    double locality_decay_factor;
+    if (level_size <= 2) {
+        locality_decay_factor = 1.1;
+    } else if (level_size == 3) {
+        locality_decay_factor = 1.25;
+    } else if (level_size == 4) {
+        locality_decay_factor = 1.45;
+    } else if (level_size == 5) {
+        locality_decay_factor = 1.7;
+    } else {
+        locality_decay_factor = 2;
+    }
+    static TypeDescriptor s_auxiliary_column_type = TypeDescriptor(TYPE_BIGINT);
+    const size_t total_late_materialized_cost =
+            s_auxiliary_column_type.get_slot_size() * level_size + materialized_cost * locality_decay_factor;
+
+    _late_materialization = total_late_materialized_cost <= total_original_cost;
+}
+
+ChunkPtr MergePathCascadeMerger::_late_materialize_chunk(int32_t parallel_idx, const ChunkPtr& chunk) {
     if (chunk == nullptr || chunk->is_empty()) {
         return nullptr;
     }
@@ -907,7 +950,7 @@ ChunkPtr MergePathCascadeMerger::_late_materialize_chunk(int32_t parallel_idx, c
     for (int64_t perm : perms) {
         // <---44 bits for chunk id--><--20 bits for row-->
         const auto chunk_id = static_cast<size_t>(perm >> 44);
-        const auto row = static_cast<size_t>(perm & (0xfffff));
+        const auto row = static_cast<size_t>(perm & MAX_CHUNK_SIZE);
         if (prev_chunk_id == -1) {
             output = _original_chunks[chunk_id]->clone_empty(num_rows);
             prev_chunk_id = chunk_id;
@@ -972,4 +1015,5 @@ void MergePathCascadeMerger::_reset_output() {
     _flat_output_chunks.clear();
     _output_idx = 0;
 }
+
 } // namespace starrocks::merge_path
