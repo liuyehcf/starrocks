@@ -646,7 +646,8 @@ void MergePathCascadeMerger::bind_profile(int32_t parallel_idx, RuntimeProfile* 
 size_t MergePathCascadeMerger::add_original_chunk(ChunkPtr&& chunk) {
     std::lock_guard<std::mutex> l(_m);
     const size_t chunk_id = _chunk_id_generator++;
-    _original_chunks[chunk_id] = std::move(chunk);
+    const size_t chunk_size = chunk->num_rows();
+    _original_chunks[chunk_id] = std::make_pair(std::move(chunk), chunk_size);
     return chunk_id;
 }
 
@@ -947,12 +948,32 @@ ChunkPtr MergePathCascadeMerger::_late_materialize_chunk(int32_t parallel_idx, c
     size_t prev_row = std::numeric_limits<size_t>::max();
     size_t range_start = std::numeric_limits<size_t>::max();
 
+    auto get_original_pair = [this](size_t chunk_id) -> std::pair<ChunkPtr, size_t>* {
+        std::lock_guard<std::mutex> l(_m);
+        return &_original_chunks[chunk_id];
+    };
+
+    auto append_original = [this, &get_original_pair](ChunkPtr& output, size_t chunk_id, size_t offset, size_t count) {
+        auto* pair = get_original_pair(chunk_id);
+        DCHECK(pair != nullptr);
+        output->append(*pair->first, offset, count);
+        DCHECK_GE(pair->second, count);
+        pair->second -= count;
+
+        if (pair->second == 0) {
+            std::lock_guard<std::mutex> l(_m);
+            _original_chunks.erase(chunk_id);
+        }
+    };
+
     for (int64_t perm : perms) {
         // <---44 bits for chunk id--><--20 bits for row-->
         const auto chunk_id = static_cast<size_t>(perm >> 44);
         const auto row = static_cast<size_t>(perm & MAX_CHUNK_SIZE);
         if (prev_chunk_id == -1) {
-            output = _original_chunks[chunk_id]->clone_empty(num_rows);
+            auto* pair = get_original_pair(chunk_id);
+            DCHECK(pair != nullptr);
+            output = pair->first->clone_empty(num_rows);
             prev_chunk_id = chunk_id;
             prev_row = row;
             range_start = row;
@@ -964,7 +985,7 @@ ChunkPtr MergePathCascadeMerger::_late_materialize_chunk(int32_t parallel_idx, c
         }
 
         // append previous range
-        output->append(*_original_chunks[prev_chunk_id], range_start, prev_row - range_start + 1);
+        append_original(output, prev_chunk_id, range_start, prev_row - range_start + 1);
 
         prev_chunk_id = chunk_id;
         range_start = row;
@@ -972,7 +993,7 @@ ChunkPtr MergePathCascadeMerger::_late_materialize_chunk(int32_t parallel_idx, c
     }
 
     // append last part
-    output->append(*_original_chunks[prev_chunk_id], range_start, prev_row - range_start + 1);
+    append_original(output, prev_chunk_id, range_start, prev_row - range_start + 1);
 
     return output;
 }

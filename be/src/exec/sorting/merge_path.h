@@ -438,7 +438,7 @@ private:
     // Fields used for late materialization
     bool _late_materialization = false;
     size_t _chunk_id_generator = 0;
-    std::unordered_map<size_t, ChunkPtr> _original_chunks;
+    phmap::node_hash_map<size_t, std::pair<ChunkPtr, size_t>> _original_chunks;
 
     // Output chunks for each parallelism
     std::vector<std::vector<ChunkPtr>> _output_chunks;
