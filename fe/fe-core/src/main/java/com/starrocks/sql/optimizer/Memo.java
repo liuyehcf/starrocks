@@ -203,9 +203,10 @@ public class Memo {
             for (int i = 0; i < modifyExpression.getInputs().size(); i++) {
                 if (modifyExpression.getInputs().get(i) == srcGroup) {
                     // remove self from his group, and reinsert later
-                    modifyExpression.getGroup().removeGroupExpression(modifyExpression);
-                    modifyExpression.getInputs().set(i, dstGroup);
-                    needReinsertedExpressions.add(modifyExpression);
+                    if (modifyExpression.getGroup().removeGroupExpression(modifyExpression)) {
+                        modifyExpression.getInputs().set(i, dstGroup);
+                        needReinsertedExpressions.add(modifyExpression);
+                    }
                 }
             }
         }

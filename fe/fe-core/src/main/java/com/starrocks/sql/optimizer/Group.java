@@ -248,11 +248,11 @@ public class Group {
         }
     }
 
-    public void removeGroupExpression(GroupExpression groupExpression) {
+    public boolean removeGroupExpression(GroupExpression groupExpression) {
         if (groupExpression.getOp().isLogical()) {
-            logicalExpressions.remove(groupExpression);
+            return logicalExpressions.remove(groupExpression);
         } else {
-            physicalExpressions.remove(groupExpression);
+            return physicalExpressions.remove(groupExpression);
         }
     }
 
