@@ -26,9 +26,10 @@ public class MysqlOkPacket extends MysqlPacket {
     // TODO(zhaochun): following are not used
     private static final long LAST_INSERT_ID = 0;
     private final String infoMessage;
-    private long affectedRows = 0;
-    private int warningRows = 0;
-    private int serverStatus = 0;
+    private final String queryId = "test query id";
+    private final long affectedRows;
+    private final int warningRows;
+    private final int serverStatus;
 
     public MysqlOkPacket(QueryState state) {
         infoMessage = state.getInfoMessage();
@@ -51,6 +52,8 @@ public class MysqlOkPacket extends MysqlPacket {
         } else if (capability.isTransactions()) {
             serializer.writeInt2(serverStatus);
         }
+
+        serializer.writeLenEncodedString(queryId);
 
         if (capability.isSessionTrack()) {
             serializer.writeLenEncodedString(infoMessage);
