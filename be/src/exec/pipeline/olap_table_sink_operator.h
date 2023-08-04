@@ -32,7 +32,7 @@ public:
     OlapTableSinkOperator(OperatorFactory* factory, int32_t id, int32_t plan_node_id, int32_t driver_sequence,
                           int32_t sender_id, starrocks::stream_load::OlapTableSink* sink,
                           FragmentContext* const fragment_ctx)
-            : Operator(factory, id, "olap_table_sink", plan_node_id, driver_sequence),
+            : Operator(factory, id, "olap_table_sink", plan_node_id, false, driver_sequence),
               _sink(sink),
               _fragment_ctx(fragment_ctx),
               _sender_id(sender_id) {}

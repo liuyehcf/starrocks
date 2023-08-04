@@ -35,7 +35,7 @@ namespace starrocks::pipeline {
 
 ScanOperator::ScanOperator(OperatorFactory* factory, int32_t id, int32_t driver_sequence, int32_t dop,
                            ScanNode* scan_node)
-        : SourceOperator(factory, id, scan_node->name(), scan_node->id(), driver_sequence),
+        : SourceOperator(factory, id, scan_node->name(), scan_node->id(), false, driver_sequence),
           _scan_node(scan_node),
           _dop(dop),
           _io_tasks_per_scan_operator(scan_node->io_tasks_per_scan_operator()),
@@ -572,7 +572,7 @@ pipeline::OpFactories decompose_scan_node_to_pipeline(std::shared_ptr<ScanOperat
         ExecNode::may_add_chunk_accumulate_operator(ops, context, scan_node->id());
     }
 
-    ops = context->maybe_interpolate_collect_stats(context->runtime_state(), ops);
+    ops = context->maybe_interpolate_collect_stats(context->runtime_state(), scan_node->id(), ops);
 
     return ops;
 }

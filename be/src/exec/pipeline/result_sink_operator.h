@@ -34,7 +34,7 @@ public:
                        std::vector<ExprContext*> output_expr_ctxs, const std::shared_ptr<BufferControlBlock>& sender,
                        std::atomic<int32_t>& num_result_sinks, std::atomic<int64_t>& num_written_rows,
                        FragmentContext* const fragment_ctx)
-            : Operator(factory, id, "result_sink", plan_node_id, driver_sequence),
+            : Operator(factory, id, "result_sink", plan_node_id, false, driver_sequence),
               _sink_type(sink_type),
               _format_type(format_type),
               _output_expr_ctxs(std::move(output_expr_ctxs)),

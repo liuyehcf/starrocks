@@ -35,7 +35,7 @@ class ExportSinkOperator final : public Operator {
 public:
     ExportSinkOperator(OperatorFactory* factory, int32_t id, int32_t plan_node_id, int32_t driver_sequence,
                        std::shared_ptr<ExportSinkIOBuffer> export_sink_buffer)
-            : Operator(factory, id, "export_sink", plan_node_id, driver_sequence),
+            : Operator(factory, id, "export_sink", plan_node_id, false, driver_sequence),
               _export_sink_buffer(std::move(std::move(export_sink_buffer))) {}
 
     ~ExportSinkOperator() override = default;
