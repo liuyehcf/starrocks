@@ -786,6 +786,7 @@ public abstract class Expr extends TreeNode<Expr> implements ParseNode, Cloneabl
     public TExpr treeToThrift() {
         TExpr result = new TExpr();
         treeToThriftHelper(result, Expr::toThrift);
+        result.getNodes().get(0).display_str = toSqlImpl();
         return result;
     }
 
