@@ -231,6 +231,9 @@ struct TExprNode {
   54: optional bool is_monotonic
 
   55: optional TDictQueryExpr dict_query_expr
+
+  // For error reporting or some other usage
+  56: optional string display_str
 }
 
 struct TPartitionLiteral {
