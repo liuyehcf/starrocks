@@ -496,6 +496,20 @@ public class ConnectContext {
         this.lastQueryId = queryId;
     }
 
+    public boolean isProfileEnabled() {
+        if (sessionVariable == null) {
+            return false;
+        }
+        if (sessionVariable.isEnableProfile()) {
+            return true;
+        }
+        if (!sessionVariable.isEnableBigQueryProfile()) {
+            return false;
+        }
+        return System.currentTimeMillis() - getStartTime() >
+                1000L * sessionVariable.getBigQueryProfileSecondThreshold();
+    }
+
     public byte[] getAuthDataSalt() {
         return authDataSalt;
     }

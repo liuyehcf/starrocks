@@ -461,7 +461,7 @@ public class StmtExecutor {
                             throw e;
                         }
                     } finally {
-                        if (!needRetry && context.getSessionVariable().isEnableProfile()) {
+                        if (!needRetry && context.isProfileEnabled()) {
                             writeProfile(beginTimeInNanoSecond);
                         }
                         QeProcessorImpl.INSTANCE.unregisterQuery(context.getExecutionId());
@@ -484,7 +484,7 @@ public class StmtExecutor {
             } else if (parsedStmt instanceof DmlStmt) {
                 try {
                     handleDMLStmt(execPlan, (DmlStmt) parsedStmt);
-                    if (context.getSessionVariable().isEnableProfile()) {
+                    if (context.isProfileEnabled()) {
                         writeProfile(beginTimeInNanoSecond);
                     }
                 } catch (Throwable t) {
@@ -579,7 +579,7 @@ public class StmtExecutor {
             InsertStmt insertStmt = createTableAsSelectStmt.getInsertStmt();
             ExecPlan execPlan = new StatementPlanner().plan(insertStmt, context);
             handleDMLStmt(execPlan, ((CreateTableAsSelectStmt) parsedStmt).getInsertStmt());
-            if (context.getSessionVariable().isEnableProfile()) {
+            if (context.isProfileEnabled()) {
                 writeProfile(beginTimeInNanoSecond);
             }
             if (context.getState().getStateType() == MysqlStateType.ERR) {
