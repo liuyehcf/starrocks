@@ -535,6 +535,23 @@ void detail::LeafNode::process_input(const int32_t parallel_idx) {
             continue;
         }
 
+        // MAKE SURE that the chunk's size >= Merger::_chunk_size, otherwise, the merge algorithm may suffer
+        // significant performance degradation.
+        // For example, if you have two streams of inputs, where one has 100 rows and the other has only 1 row,
+        // then the merge algorithm can only move forward 1 row each time in stream mode.
+        if (_buffer == nullptr) {
+            if (chunk->num_rows() < _merger->chunk_size()) {
+                _buffer = std::move(chunk);
+                continue;
+            }
+        } else {
+            _buffer->append(*chunk);
+            if (_buffer->num_rows() < _merger->chunk_size()) {
+                continue;
+            }
+            chunk = std::move(_buffer);
+        }
+
         Columns orderby;
         for (auto* expr : _merger->sort_exprs()) {
             auto column = EVALUATE_NULL_IF_ERROR(expr, expr->root(), chunk.get());
@@ -680,7 +697,7 @@ bool MergePathCascadeMerger::is_pending(const int32_t parallel_idx) {
     return false;
 }
 
-bool MergePathCascadeMerger::is_finished() {
+bool MergePathCascadeMerger::is_finished() const {
     // Since FINISHED is the final stage, so no lock needed here.
     return _stage == detail::Stage::FINISHED;
 }

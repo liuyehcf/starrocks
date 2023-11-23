@@ -256,6 +256,7 @@ private:
 
     const bool _late_materialization;
     MergePathChunkProvider _provider;
+    ChunkPtr _buffer;
     bool _provider_eos = false;
 };
 
@@ -375,7 +376,8 @@ public:
     const std::vector<ExprContext*>& sort_exprs() const { return _sort_exprs; }
     const SortDescs& sort_descs() const { return _sort_descs; }
 
-    size_t streaming_batch_size() { return _streaming_batch_size; }
+    size_t chunk_size() const { return _chunk_size; }
+    size_t streaming_batch_size() const { return _streaming_batch_size; }
 
     // There may be several parallelism working on the same stage
     // Return true if the current stage's work is done for the particular parallel_idx
@@ -387,7 +389,7 @@ public:
     bool is_pending(const int32_t parallel_idx);
 
     // Return true if merge process is done
-    bool is_finished();
+    bool is_finished() const;
 
     // All the merge process are triggered by this method
     ChunkPtr try_get_next(const int32_t parallel_idx);
