@@ -34,6 +34,7 @@
 
 package com.starrocks.planner;
 
+import com.google.common.collect.Lists;
 import com.starrocks.analysis.BinaryPredicate;
 import com.starrocks.analysis.BinaryType;
 import com.starrocks.analysis.Expr;
@@ -129,6 +130,10 @@ public class HashJoinNode extends JoinNode {
         if (getCanLocalShuffle()) {
             msg.hash_join_node.setInterpolate_passthrough(
                     ConnectContext.get().getSessionVariable().isHashJoinInterpolatePassthrough());
+        }
+        if (ukfkProperty != null && !ukfkProperty.isLeftUK) {
+            msg.hash_join_node.setUk_exprs(Expr.treesToThrift(Lists.newArrayList(ukfkProperty.ukColumn)));
+            msg.hash_join_node.setFk_exprs(Expr.treesToThrift(Lists.newArrayList(ukfkProperty.fkColumn)));
         }
     }
 

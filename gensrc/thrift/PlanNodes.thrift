@@ -630,6 +630,10 @@ struct THashJoinNode {
 
   // used in pipeline engine
   55: optional bool interpolate_passthrough = false
+
+  // used in uk fk join optimization
+  56: optional list<Exprs.TExpr> uk_exprs
+  57: optional list<Exprs.TExpr> fk_exprs
 }
 
 struct TMergeJoinNode {
