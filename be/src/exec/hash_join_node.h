@@ -95,6 +95,8 @@ private:
     std::vector<ExprContext*> _probe_expr_ctxs;
     std::vector<ExprContext*> _build_expr_ctxs;
     std::vector<ExprContext*> _other_join_conjunct_ctxs;
+    std::vector<ExprContext*> _uk_expr_ctxs;
+    std::vector<ExprContext*> _fk_expr_ctxs;
     std::vector<bool> _is_null_safes;
 
     // If distribution type is SHUFFLE_HASH_BUCKET, local shuffle can use the

@@ -18,6 +18,7 @@
 
 #include <atomic>
 
+#include "exec/chunks_sorter.h"
 #include "exec/hash_joiner.h"
 #include "exec/pipeline/hashjoin/hash_joiner_factory.h"
 #include "exec/pipeline/operator.h"
@@ -33,7 +34,8 @@ class HashJoinBuildOperator : public Operator {
 public:
     HashJoinBuildOperator(OperatorFactory* factory, int32_t id, const string& name, int32_t plan_node_id,
                           int32_t driver_sequence, HashJoinerPtr join_builder,
-                          PartialRuntimeFilterMerger* partial_rf_merger, TJoinDistributionMode::type distribution_mode);
+                          PartialRuntimeFilterMerger* partial_rf_merger, ChunksSorter* sorter,
+                          TJoinDistributionMode::type distribution_mode);
     ~HashJoinBuildOperator() override = default;
 
     Status prepare(RuntimeState* state) override;
@@ -62,8 +64,11 @@ public:
 protected:
     HashJoinerPtr _join_builder;
     PartialRuntimeFilterMerger* _partial_rf_merger;
+    ChunksSorter* _sorter;
     mutable size_t _avg_keys_per_bucket = 0;
     std::atomic<bool> _is_finished = false;
+
+    RuntimeProfile::Counter* _sort_timer = nullptr;
 
     const TJoinDistributionMode::type _distribution_mode;
 };
@@ -85,6 +90,7 @@ public:
 protected:
     HashJoinerFactoryPtr _hash_joiner_factory;
     std::unique_ptr<PartialRuntimeFilterMerger> _partial_rf_merger;
+    std::vector<std::unique_ptr<ChunksSorter>> _sorters;
     std::vector<Columns> _string_key_columns;
     const TJoinDistributionMode::type _distribution_mode;
     SpillProcessChannelFactoryPtr _spill_channel_factory;

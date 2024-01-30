@@ -123,6 +123,10 @@ Status HashJoinNode::init(const TPlanNode& tnode, RuntimeState* state) {
 
     RETURN_IF_ERROR(Expr::create_expr_trees(_pool, tnode.hash_join_node.other_join_conjuncts,
                                             &_other_join_conjunct_ctxs, state));
+    if (tnode.hash_join_node.__isset.uk_exprs && tnode.hash_join_node.__isset.fk_exprs) {
+        RETURN_IF_ERROR(Expr::create_expr_trees(_pool, tnode.hash_join_node.uk_exprs, &_uk_expr_ctxs, state));
+        RETURN_IF_ERROR(Expr::create_expr_trees(_pool, tnode.hash_join_node.fk_exprs, &_fk_expr_ctxs, state));
+    }
 
     for (const auto& desc : tnode.hash_join_node.build_runtime_filters) {
         auto* rf_desc = _pool->add(new RuntimeFilterBuildDescriptor());
@@ -171,6 +175,8 @@ Status HashJoinNode::prepare(RuntimeState* state) {
     RETURN_IF_ERROR(Expr::prepare(_build_expr_ctxs, state));
     RETURN_IF_ERROR(Expr::prepare(_probe_expr_ctxs, state));
     RETURN_IF_ERROR(Expr::prepare(_other_join_conjunct_ctxs, state));
+    RETURN_IF_ERROR(Expr::prepare(_uk_expr_ctxs, state));
+    RETURN_IF_ERROR(Expr::prepare(_fk_expr_ctxs, state));
 
     HashTableParam param;
     _init_hash_table_param(&param);
@@ -226,6 +232,8 @@ Status HashJoinNode::open(RuntimeState* state) {
     RETURN_IF_ERROR(Expr::open(_build_expr_ctxs, state));
     RETURN_IF_ERROR(Expr::open(_probe_expr_ctxs, state));
     RETURN_IF_ERROR(Expr::open(_other_join_conjunct_ctxs, state));
+    RETURN_IF_ERROR(Expr::open(_uk_expr_ctxs, state));
+    RETURN_IF_ERROR(Expr::open(_fk_expr_ctxs, state));
 
     {
         build_timer.stop();
@@ -416,6 +424,8 @@ void HashJoinNode::close(RuntimeState* state) {
     Expr::close(_build_expr_ctxs, state);
     Expr::close(_probe_expr_ctxs, state);
     Expr::close(_other_join_conjunct_ctxs, state);
+    Expr::close(_uk_expr_ctxs, state);
+    Expr::close(_fk_expr_ctxs, state);
 
     _ht.close();
 
@@ -465,9 +475,10 @@ pipeline::OpFactories HashJoinNode::_decompose_to_pipeline(pipeline::PipelineBui
 
     auto* pool = context->fragment_context()->runtime_state()->obj_pool();
     HashJoinerParam param(pool, _hash_join_node, _id, _type, _is_null_safes, _build_expr_ctxs, _probe_expr_ctxs,
-                          _other_join_conjunct_ctxs, _conjunct_ctxs, child(1)->row_desc(), child(0)->row_desc(),
-                          _row_descriptor, child(1)->type(), child(0)->type(), child(1)->conjunct_ctxs().empty(),
-                          _build_runtime_filters, _output_slots, _output_slots, _distribution_mode, false);
+                          _other_join_conjunct_ctxs, _conjunct_ctxs, _uk_expr_ctxs, _fk_expr_ctxs, child(1)->row_desc(),
+                          child(0)->row_desc(), _row_descriptor, child(1)->type(), child(0)->type(),
+                          child(1)->conjunct_ctxs().empty(), _build_runtime_filters, _output_slots, _output_slots,
+                          _distribution_mode, false);
     auto hash_joiner_factory = std::make_shared<starrocks::pipeline::HashJoinerFactory>(param);
 
     // add placeholder into RuntimeFilterHub, HashJoinBuildOperator will generate runtime filters and fill it,

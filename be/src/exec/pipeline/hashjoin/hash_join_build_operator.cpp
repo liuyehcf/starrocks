@@ -16,6 +16,7 @@
 
 #include <utility>
 
+#include "exec/chunks_sorter_full_sort.h"
 #include "exec/pipeline/query_context.h"
 #include "runtime/current_thread.h"
 #include "runtime/runtime_filter_worker.h"
@@ -23,15 +24,20 @@ namespace starrocks::pipeline {
 
 HashJoinBuildOperator::HashJoinBuildOperator(OperatorFactory* factory, int32_t id, const string& name,
                                              int32_t plan_node_id, int32_t driver_sequence, HashJoinerPtr join_builder,
-                                             PartialRuntimeFilterMerger* partial_rf_merger,
+                                             PartialRuntimeFilterMerger* partial_rf_merger, ChunksSorter* sorter,
                                              const TJoinDistributionMode::type distribution_mode)
         : Operator(factory, id, name, plan_node_id, false, driver_sequence),
           _join_builder(std::move(join_builder)),
           _partial_rf_merger(partial_rf_merger),
+          _sorter(sorter),
           _distribution_mode(distribution_mode) {}
 
 Status HashJoinBuildOperator::push_chunk(RuntimeState* state, const ChunkPtr& chunk) {
-    return _join_builder->append_chunk_to_ht(chunk);
+    if (_sorter != nullptr) {
+        return _sorter->update(state, chunk);
+    } else {
+        return _join_builder->append_chunk_to_ht(chunk);
+    }
 }
 
 Status HashJoinBuildOperator::prepare(RuntimeState* state) {
@@ -47,6 +53,10 @@ Status HashJoinBuildOperator::prepare(RuntimeState* state) {
     _join_builder->ref();
 
     RETURN_IF_ERROR(_join_builder->prepare_builder(state, _unique_metrics.get()));
+
+    if (_sorter != nullptr) {
+        _sorter->setup_runtime(state, _unique_metrics.get(), state->instance_mem_tracker());
+    }
 
     return Status::OK();
 }
@@ -80,6 +90,22 @@ Status HashJoinBuildOperator::set_finishing(RuntimeState* state) {
     if (state->is_cancelled()) {
         return Status::Cancelled("runtime state is cancelled");
     }
+
+    if (_sorter != nullptr) {
+        SCOPED_TIMER(_sort_timer);
+        RETURN_IF_ERROR(_sorter->done(state));
+        while (_sorter->has_output()) {
+            ChunkPtr chunk;
+            bool eos = false;
+            RETURN_IF_ERROR(_sorter->get_next(&chunk, &eos));
+            RETURN_IF_ERROR(_join_builder->append_chunk_to_ht(chunk));
+
+            if (eos) {
+                break;
+            }
+        }
+    }
+
     RETURN_IF_ERROR(_join_builder->build_ht(state));
 
     size_t merger_index = _driver_sequence;
@@ -153,9 +179,25 @@ OperatorPtr HashJoinBuildOperatorFactory::create(int32_t dop, int32_t driver_seq
         _string_key_columns.resize(dop);
     }
 
+    if (_sorters.empty()) {
+        _sorters.resize(dop);
+    }
+
+    if (!_hash_joiner_factory->hash_join_param()._uk_expr_ctxs.empty()) {
+        static std::vector<bool> is_asc = {true};
+        static std::vector<bool> is_null_first = {true};
+        static int64_t max_buffered_rows = 1024000;
+        static int64_t max_buffered_bytes = 16 * 1024 * 1024;
+        static std::vector<SlotId> late_materialized_slots;
+        _sorters[driver_sequence] = std::make_unique<ChunksSorterFullSort>(
+                _state, &_hash_joiner_factory->hash_join_param()._uk_expr_ctxs, &is_asc, &is_null_first, "",
+                max_buffered_rows, max_buffered_bytes, late_materialized_slots);
+    }
+
     return std::make_shared<HashJoinBuildOperator>(this, _id, _name, _plan_node_id, driver_sequence,
                                                    _hash_joiner_factory->create_builder(dop, driver_sequence),
-                                                   _partial_rf_merger.get(), _distribution_mode);
+                                                   _partial_rf_merger.get(), _sorters[driver_sequence].get(),
+                                                   _distribution_mode);
 }
 
 void HashJoinBuildOperatorFactory::retain_string_key_columns(int32_t driver_sequence, Columns&& columns) {

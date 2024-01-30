@@ -68,6 +68,7 @@ struct HashJoinerParam {
                     TPlanNodeType::type node_type, std::vector<bool> is_null_safes,
                     std::vector<ExprContext*> build_expr_ctxs, std::vector<ExprContext*> probe_expr_ctxs,
                     std::vector<ExprContext*> other_join_conjunct_ctxs, std::vector<ExprContext*> conjunct_ctxs,
+                    std::vector<ExprContext*> uk_expr_ctxs, std::vector<ExprContext*> fk_expr_ctxs,
                     const RowDescriptor& build_row_descriptor, const RowDescriptor& probe_row_descriptor,
                     const RowDescriptor& row_descriptor, TPlanNodeType::type build_node_type,
                     TPlanNodeType::type probe_node_type, bool build_conjunct_ctxs_is_empty,
@@ -83,6 +84,8 @@ struct HashJoinerParam {
               _probe_expr_ctxs(std::move(probe_expr_ctxs)),
               _other_join_conjunct_ctxs(std::move(other_join_conjunct_ctxs)),
               _conjunct_ctxs(std::move(conjunct_ctxs)),
+              _uk_expr_ctxs(std::move(uk_expr_ctxs)),
+              _fk_expr_ctxs(std::move(fk_expr_ctxs)),
               _build_row_descriptor(build_row_descriptor),
               _probe_row_descriptor(probe_row_descriptor),
               _row_descriptor(row_descriptor),
@@ -108,6 +111,8 @@ struct HashJoinerParam {
     const std::vector<ExprContext*> _probe_expr_ctxs;
     const std::vector<ExprContext*> _other_join_conjunct_ctxs;
     const std::vector<ExprContext*> _conjunct_ctxs;
+    const std::vector<ExprContext*> _uk_expr_ctxs;
+    const std::vector<ExprContext*> _fk_expr_ctxs;
     const RowDescriptor _build_row_descriptor;
     const RowDescriptor _probe_row_descriptor;
     const RowDescriptor _row_descriptor;
@@ -406,6 +411,8 @@ private:
     const std::vector<ExprContext*>& _other_join_conjunct_ctxs;
     // Conjuncts in Join followed by a filter predicate, usually in Where and Having.
     const std::vector<ExprContext*>& _conjunct_ctxs;
+    const std::vector<ExprContext*>& _uk_expr_ctxs;
+    const std::vector<ExprContext*>& _fk_expr_ctxs;
     const RowDescriptor& _build_row_descriptor;
     const RowDescriptor& _probe_row_descriptor;
     const RowDescriptor& _row_descriptor;

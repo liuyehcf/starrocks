@@ -280,7 +280,7 @@ OperatorPtr SpillableHashJoinBuildOperatorFactory::create(int32_t degree_of_para
     joiner->set_spiller(spiller);
 
     return std::make_shared<SpillableHashJoinBuildOperator>(this, _id, "spillable_hash_join_build", _plan_node_id,
-                                                            driver_sequence, joiner, _partial_rf_merger.get(),
+                                                            driver_sequence, joiner, _partial_rf_merger.get(), nullptr,
                                                             _distribution_mode);
 }
 

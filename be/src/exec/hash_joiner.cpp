@@ -61,6 +61,8 @@ HashJoiner::HashJoiner(const HashJoinerParam& param)
           _probe_expr_ctxs(param._probe_expr_ctxs),
           _other_join_conjunct_ctxs(param._other_join_conjunct_ctxs),
           _conjunct_ctxs(param._conjunct_ctxs),
+          _uk_expr_ctxs(param._uk_expr_ctxs),
+          _fk_expr_ctxs(param._fk_expr_ctxs),
           _build_row_descriptor(param._build_row_descriptor),
           _probe_row_descriptor(param._probe_row_descriptor),
           _row_descriptor(param._row_descriptor),
