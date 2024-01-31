@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include "exec/chunks_sorter.h"
 #include "exec/hash_joiner.h"
 #include "exec/pipeline/hashjoin/hash_joiner_factory.h"
 #include "exec/pipeline/operator.h"
@@ -27,7 +28,8 @@ using HashJoiner = starrocks::HashJoiner;
 class HashJoinProbeOperator : public OperatorWithDependency {
 public:
     HashJoinProbeOperator(OperatorFactory* factory, int32_t id, const string& name, int32_t plan_node_id,
-                          int32_t driver_sequence, HashJoinerPtr join_prober, HashJoinerPtr join_builder);
+                          int32_t driver_sequence, HashJoinerPtr join_prober, HashJoinerPtr join_builder,
+                          HashJoinerFactoryPtr hash_joiner_factory);
     ~HashJoinProbeOperator() override = default;
 
     Status prepare(RuntimeState* state) override;
@@ -62,6 +64,7 @@ protected:
     // For broadcast join, _join_prober references the hash table owned by _join_builder,
     // so increase the reference number of _join_builder to prevent it closing early.
     const HashJoinerPtr _join_builder;
+    const HashJoinerFactoryPtr _hash_joiner_factory;
 };
 
 class HashJoinProbeOperatorFactory : public OperatorFactory {

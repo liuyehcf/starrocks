@@ -14,16 +14,18 @@
 
 #include "exec/pipeline/hashjoin/hash_join_probe_operator.h"
 
+#include "exec/chunks_sorter_full_sort.h"
 #include "runtime/current_thread.h"
 
 namespace starrocks::pipeline {
 
 HashJoinProbeOperator::HashJoinProbeOperator(OperatorFactory* factory, int32_t id, const string& name,
                                              int32_t plan_node_id, int32_t driver_sequence, HashJoinerPtr join_prober,
-                                             HashJoinerPtr join_builder)
+                                             HashJoinerPtr join_builder, HashJoinerFactoryPtr hash_joiner_factory)
         : OperatorWithDependency(factory, id, name, plan_node_id, false, driver_sequence),
           _join_prober(std::move(join_prober)),
-          _join_builder(std::move(join_builder)) {}
+          _join_builder(std::move(join_builder)),
+          _hash_joiner_factory(std::move(hash_joiner_factory)) {}
 
 void HashJoinProbeOperator::close(RuntimeState* state) {
     if (_join_prober != _join_builder) {
@@ -74,8 +76,35 @@ bool HashJoinProbeOperator::is_ready() const {
 }
 
 Status HashJoinProbeOperator::push_chunk(RuntimeState* state, const ChunkPtr& chunk) {
-    RETURN_IF_ERROR(_reference_builder_hash_table_once());
-    RETURN_IF_ERROR(_join_prober->push_chunk(state, std::move(const_cast<ChunkPtr&>(chunk))));
+    if (!_hash_joiner_factory->hash_join_param()._fk_expr_ctxs.empty()) {
+        static std::vector<bool> is_asc = {true};
+        static std::vector<bool> is_null_first = {true};
+        static int64_t max_buffered_rows = 1024000;
+        static int64_t max_buffered_bytes = 16 * 1024 * 1024;
+        static std::vector<SlotId> late_materialized_slots;
+        auto sorter = std::make_unique<ChunksSorterFullSort>(
+                state, &_hash_joiner_factory->hash_join_param()._fk_expr_ctxs, &is_asc, &is_null_first, "",
+                max_buffered_rows, max_buffered_bytes, late_materialized_slots);
+        sorter->setup_runtime(state, _unique_metrics.get(), state->instance_mem_tracker());
+        RETURN_IF_ERROR(sorter->update(state, chunk));
+        RETURN_IF_ERROR(sorter->done(state));
+        while (sorter->has_output()) {
+            ChunkPtr maybe_ordered_chunk = nullptr;
+            bool eos = false;
+            RETURN_IF_ERROR(sorter->get_next(&maybe_ordered_chunk, &eos));
+            if (maybe_ordered_chunk != nullptr) {
+                RETURN_IF_ERROR(_reference_builder_hash_table_once());
+                RETURN_IF_ERROR(_join_prober->push_chunk(state, std::move(const_cast<ChunkPtr&>(maybe_ordered_chunk))));
+            }
+            if (eos) {
+                break;
+            }
+        }
+    } else {
+        RETURN_IF_ERROR(_reference_builder_hash_table_once());
+        RETURN_IF_ERROR(_join_prober->push_chunk(state, std::move(const_cast<ChunkPtr&>(chunk))));
+    }
+
     return Status::OK();
 }
 
@@ -136,9 +165,9 @@ void HashJoinProbeOperatorFactory::close(RuntimeState* state) {
 }
 
 OperatorPtr HashJoinProbeOperatorFactory::create(int32_t dop, int32_t driver_sequence) {
-    return std::make_shared<HashJoinProbeOperator>(this, _id, _name, _plan_node_id, driver_sequence,
-                                                   _hash_joiner_factory->create_prober(dop, driver_sequence),
-                                                   _hash_joiner_factory->get_builder(dop, driver_sequence));
+    return std::make_shared<HashJoinProbeOperator>(
+            this, _id, _name, _plan_node_id, driver_sequence, _hash_joiner_factory->create_prober(dop, driver_sequence),
+            _hash_joiner_factory->get_builder(dop, driver_sequence), _hash_joiner_factory);
 }
 
 } // namespace starrocks::pipeline
